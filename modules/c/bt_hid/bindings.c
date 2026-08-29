@@ -22,7 +22,7 @@
 
 // Native report layout:
 //   Report 1 = keyboard input (8 bytes, no report ID in notification body)
-//   Report 2 = keyboard LED output
+//   Report 3 = Consumer Control input (2-byte usage ID, little-endian)
 //   Report 4 = mouse input (4 bytes: buttons, X, Y, wheel)
 //
 // We deliberately keep exactly three Report characteristics because BTstack's
@@ -60,21 +60,29 @@ static const uint8_t native_hid_report_map[] = {
     0x29, 0x65,
     0x81, 0x00,
 
-    // LED output report ID 2.
-    0x85, 0x02,
-    0x05, 0x08,
-    0x19, 0x01,
-    0x29, 0x05,
-    0x15, 0x00,
-    0x25, 0x01,
-    0x75, 0x01,
-    0x95, 0x05,
-    0x91, 0x02,
-    0x75, 0x03,
-    0x95, 0x01,
-    0x91, 0x01,
-
     0xC0,
+
+    // ---------------------------------------------------------------------
+    // Consumer Control application, input report ID 3.
+    //
+    // The body is a 16-bit Consumer usage ID (little-endian). A value of
+    // zero means "no control pressed". Keeping this as a usage array rather
+    // than hard-wiring one button means Python can later send other Consumer
+    // usages (volume/media/browser controls) without changing the descriptor.
+    // AC Back is usage 0x0224.
+    // ---------------------------------------------------------------------
+    0x05, 0x0C,             // Usage Page (Consumer)
+    0x09, 0x01,             // Usage (Consumer Control)
+    0xA1, 0x01,             // Collection (Application)
+    0x85, 0x03,             //   Report ID (3)
+    0x15, 0x00,             //   Logical Minimum (0)
+    0x26, 0xFF, 0x02,       //   Logical Maximum (0x02FF)
+    0x19, 0x00,             //   Usage Minimum (0)
+    0x2A, 0xFF, 0x02,       //   Usage Maximum (0x02FF)
+    0x75, 0x10,             //   Report Size (16)
+    0x95, 0x01,             //   Report Count (1)
+    0x81, 0x00,             //   Input (Data, Array, Absolute)
+    0xC0,                   // End Collection
 
     // ---------------------------------------------------------------------
     // Mouse application, input report ID 4.
@@ -114,16 +122,18 @@ static const uint8_t native_hid_report_map[] = {
 };
 
 static uint8_t report_ref_keyboard_input[2] = {1, 1};
-static uint8_t report_ref_output[2]         = {2, 2};
+static uint8_t report_ref_consumer_input[2] = {3, 1};
 static uint8_t report_ref_mouse_input[2]    = {4, 1};
 static uint8_t hid_information[4]           = {0x01, 0x01, 0x00, 0x02};
 
 static uint16_t keyboard_input_handle = 0;
+static uint16_t consumer_input_handle = 0;
 static uint16_t mouse_input_handle = 0;
 static uint16_t boot_keyboard_input_handle = 0;
 static uint16_t boot_mouse_input_handle = 0;
 
 static uint8_t keyboard_input_enabled = 0;
+static uint8_t consumer_input_enabled = 0;
 static uint8_t mouse_input_enabled = 0;
 static uint8_t boot_keyboard_enabled = 0;
 static uint8_t boot_mouse_enabled = 0;
@@ -145,6 +155,8 @@ static void native_hid_packet_handler(uint8_t packet_type, uint16_t channel, uin
 
                 if (report_id == 1) {
                     keyboard_input_enabled = enabled;
+                } else if (report_id == 3) {
+                    consumer_input_enabled = enabled;
                 } else if (report_id == 4) {
                     mouse_input_enabled = enabled;
                 }
@@ -176,6 +188,7 @@ static void native_hid_packet_handler(uint8_t packet_type, uint16_t channel, uin
 
 void tufty_native_hid_db_append(void) {
     keyboard_input_handle = 0;
+    consumer_input_handle = 0;
     mouse_input_handle = 0;
     boot_keyboard_input_handle = 0;
     boot_mouse_input_handle = 0;
@@ -225,7 +238,7 @@ void tufty_native_hid_db_append(void) {
         sizeof(report_ref_mouse_input)
     );
 
-    att_db_util_add_characteristic_uuid16(
+    consumer_input_handle = att_db_util_add_characteristic_uuid16(
         UUID_REPORT,
         ATT_PROPERTY_READ | ATT_PROPERTY_WRITE | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC,
         ATT_SECURITY_ENCRYPTED,
@@ -238,8 +251,8 @@ void tufty_native_hid_db_append(void) {
         ATT_PROPERTY_READ,
         ATT_SECURITY_NONE,
         ATT_SECURITY_NONE,
-        report_ref_output,
-        sizeof(report_ref_output)
+        report_ref_consumer_input,
+        sizeof(report_ref_consumer_input)
     );
 
     att_db_util_add_characteristic_uuid16(
@@ -297,6 +310,7 @@ void tufty_native_hid_db_append(void) {
 
 void tufty_native_hid_start(void) {
     keyboard_input_enabled = 0;
+    consumer_input_enabled = 0;
     mouse_input_enabled = 0;
     boot_keyboard_enabled = 0;
     boot_mouse_enabled = 0;
@@ -353,6 +367,30 @@ static mp_obj_t bt_hid_send_mouse(mp_obj_t conn_obj, mp_obj_t report_obj) {
     return MP_OBJ_NEW_SMALL_INT(err);
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(bt_hid_send_mouse_obj, bt_hid_send_mouse);
+
+// Consumer Control report body is a 16-bit usage ID, little-endian.
+// Examples:
+//   0x0224 = AC Back
+//   0x00E9 = Volume Increment
+//   0x00EA = Volume Decrement
+// Send 0x0000 after the pressed usage to release it.
+static mp_obj_t bt_hid_send_consumer(mp_obj_t conn_obj, mp_obj_t report_obj) {
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(report_obj, &buf, MP_BUFFER_READ);
+    if (buf.len != 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("consumer report must be 2 bytes"));
+    }
+    require_native_hid_ready(consumer_input_handle);
+
+    int err = att_server_notify(
+        (hci_con_handle_t)mp_obj_get_int(conn_obj),
+        consumer_input_handle,
+        (const uint8_t *)buf.buf,
+        (uint16_t)buf.len
+    );
+    return MP_OBJ_NEW_SMALL_INT(err);
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(bt_hid_send_consumer_obj, bt_hid_send_consumer);
 
 static mp_obj_t bt_hid_send_boot_keyboard(mp_obj_t conn_obj, mp_obj_t report_obj) {
     mp_buffer_info_t buf;
@@ -415,6 +453,13 @@ static mp_obj_t bt_hid_status_ex(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_status_ex_obj, bt_hid_status_ex);
 
+// Kept separate from status_ex() so existing v0.5 applications retain the
+// exact five-item tuple they already expect.
+static mp_obj_t bt_hid_consumer_status(void) {
+    return MP_OBJ_NEW_SMALL_INT(consumer_input_enabled);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_consumer_status_obj, bt_hid_consumer_status);
+
 static mp_obj_t bt_hid_report_map_length(void) {
     return MP_OBJ_NEW_SMALL_INT(sizeof(native_hid_report_map));
 }
@@ -424,10 +469,12 @@ static const mp_rom_map_elem_t bt_hid_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_bt_hid) },
     { MP_ROM_QSTR(MP_QSTR_send_input), MP_ROM_PTR(&bt_hid_send_input_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_mouse), MP_ROM_PTR(&bt_hid_send_mouse_obj) },
+    { MP_ROM_QSTR(MP_QSTR_send_consumer), MP_ROM_PTR(&bt_hid_send_consumer_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_boot_keyboard), MP_ROM_PTR(&bt_hid_send_boot_keyboard_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_boot_mouse), MP_ROM_PTR(&bt_hid_send_boot_mouse_obj) },
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&bt_hid_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_status_ex), MP_ROM_PTR(&bt_hid_status_ex_obj) },
+    { MP_ROM_QSTR(MP_QSTR_consumer_status), MP_ROM_PTR(&bt_hid_consumer_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_report_map_length), MP_ROM_PTR(&bt_hid_report_map_length_obj) },
 };
 static MP_DEFINE_CONST_DICT(bt_hid_globals, bt_hid_globals_table);
