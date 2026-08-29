@@ -44,6 +44,7 @@ function ci_micropython_clone {
     git -C "$CI_BUILD_ROOT/micropython" submodule update --init lib/tinyusb
     git -C "$CI_BUILD_ROOT/micropython" submodule update --init lib/btstack
     git -C "$CI_BUILD_ROOT/micropython/lib/pico-sdk" apply "$CI_PROJECT_ROOT/ci/pico-sdk-crt0-startup-rosc.patch"
+    python3 "$CI_PROJECT_ROOT/ci/enable_ble_pairing.py" "$CI_BUILD_ROOT/micropython"
 }
 
 function ci_tools_clone {
