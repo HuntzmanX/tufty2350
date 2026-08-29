@@ -26,64 +26,66 @@
 //   Report 3 = small vendor feature report
 static const uint8_t native_hid_report_map[] = {
     // Keyboard application, input report ID 1.
-    0x05, 0x01,       // Usage Page (Generic Desktop)
-    0x09, 0x06,       // Usage (Keyboard)
-    0xA1, 0x01,       // Collection (Application)
-    0x85, 0x01,       //   Report ID (1)
+    0x05, 0x01,
+    0x09, 0x06,
+    0xA1, 0x01,
+    0x85, 0x01,
 
-    0x05, 0x07,       //   Usage Page (Keyboard)
-    0x19, 0xE0,       //   Usage Minimum (Left Control)
-    0x29, 0xE7,       //   Usage Maximum (Right GUI)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x25, 0x01,       //   Logical Maximum (1)
-    0x75, 0x01,       //   Report Size (1)
-    0x95, 0x08,       //   Report Count (8)
-    0x81, 0x02,       //   Input (Data,Var,Abs)
+    0x05, 0x07,
+    0x19, 0xE0,
+    0x29, 0xE7,
+    0x15, 0x00,
+    0x25, 0x01,
+    0x75, 0x01,
+    0x95, 0x08,
+    0x81, 0x02,
 
-    0x95, 0x01,       //   Report Count (1)
-    0x75, 0x08,       //   Report Size (8)
-    0x81, 0x01,       //   Input (Constant)
+    0x95, 0x01,
+    0x75, 0x08,
+    0x81, 0x01,
 
-    0x95, 0x06,       //   Report Count (6)
-    0x75, 0x08,       //   Report Size (8)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x25, 0x65,       //   Logical Maximum (101)
-    0x05, 0x07,       //   Usage Page (Keyboard)
-    0x19, 0x00,       //   Usage Minimum (0)
-    0x29, 0x65,       //   Usage Maximum (101)
-    0x81, 0x00,       //   Input (Data,Array)
+    0x95, 0x06,
+    0x75, 0x08,
+    0x15, 0x00,
+    0x25, 0x65,
+    0x05, 0x07,
+    0x19, 0x00,
+    0x29, 0x65,
+    0x81, 0x00,
 
     // LED output report ID 2.
-    0x85, 0x02,       //   Report ID (2)
-    0x05, 0x08,       //   Usage Page (LEDs)
+    0x85, 0x02,
+    0x05, 0x08,
     0x19, 0x01,
     0x29, 0x05,
     0x15, 0x00,
     0x25, 0x01,
     0x75, 0x01,
     0x95, 0x05,
-    0x91, 0x02,       //   Output (Data,Var,Abs)
+    0x91, 0x02,
     0x75, 0x03,
     0x95, 0x01,
-    0x91, 0x01,       //   Output (Constant)
+    0x91, 0x01,
 
     // One-byte vendor feature report ID 3.
     0x85, 0x03,
-    0x06, 0x00, 0xFF, //   Usage Page (Vendor Defined 0xFF00)
+    0x06, 0x00, 0xFF,
     0x09, 0x01,
     0x15, 0x00,
     0x26, 0xFF, 0x00,
     0x75, 0x08,
     0x95, 0x01,
-    0xB1, 0x02,       //   Feature (Data,Var,Abs)
+    0xB1, 0x02,
 
     0xC0,
 };
 
-static const uint8_t report_ref_input[2]   = {1, 1};
-static const uint8_t report_ref_output[2]  = {2, 2};
-static const uint8_t report_ref_feature[2] = {3, 3};
-static const uint8_t hid_information[4]    = {0x01, 0x01, 0x00, 0x02};
+// BTstack's runtime ATT DB helpers take mutable pointers for static attribute
+// values, even though these byte arrays are not modified by our code.
+static uint8_t report_ref_input[2]   = {1, 1};
+static uint8_t report_ref_output[2]  = {2, 2};
+static uint8_t report_ref_feature[2] = {3, 3};
+static uint8_t hid_information[4]    = {0x01, 0x01, 0x00, 0x02};
 
 static uint16_t report_input_handle = 0;
 static uint16_t boot_keyboard_input_handle = 0;
@@ -266,15 +268,19 @@ void tufty_native_hid_start(void) {
     hids_device_register_packet_handler(native_hid_packet_handler);
 }
 
+static void require_native_hid_ready(uint16_t handle) {
+    if (handle == 0) {
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("native HID service not ready"));
+    }
+}
+
 static mp_obj_t bt_hid_send_input(mp_obj_t conn_obj, mp_obj_t report_obj) {
     mp_buffer_info_t buf;
     mp_get_buffer_raise(report_obj, &buf, MP_BUFFER_READ);
     if (buf.len != 8) {
         mp_raise_ValueError(MP_ERROR_TEXT("keyboard report must be 8 bytes"));
     }
-    if (report_input_handle == 0) {
-        mp_raise_RuntimeError(MP_ERROR_TEXT("native HID service not ready"));
-    }
+    require_native_hid_ready(report_input_handle);
 
     int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
@@ -292,9 +298,7 @@ static mp_obj_t bt_hid_send_boot_keyboard(mp_obj_t conn_obj, mp_obj_t report_obj
     if (buf.len != 8) {
         mp_raise_ValueError(MP_ERROR_TEXT("boot keyboard report must be 8 bytes"));
     }
-    if (boot_keyboard_input_handle == 0) {
-        mp_raise_RuntimeError(MP_ERROR_TEXT("native HID service not ready"));
-    }
+    require_native_hid_ready(boot_keyboard_input_handle);
 
     int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
@@ -312,9 +316,7 @@ static mp_obj_t bt_hid_send_boot_mouse(mp_obj_t conn_obj, mp_obj_t report_obj) {
     if (buf.len != 3) {
         mp_raise_ValueError(MP_ERROR_TEXT("boot mouse report must be 3 bytes"));
     }
-    if (boot_mouse_input_handle == 0) {
-        mp_raise_RuntimeError(MP_ERROR_TEXT("native HID service not ready"));
-    }
+    require_native_hid_ready(boot_mouse_input_handle);
 
     int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
