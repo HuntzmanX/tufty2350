@@ -33,27 +33,24 @@ static const uint8_t native_hid_report_map[] = {
     // ---------------------------------------------------------------------
     // Keyboard application, input report ID 1.
     // ---------------------------------------------------------------------
-    0x05, 0x01,       // Usage Page (Generic Desktop)
-    0x09, 0x06,       // Usage (Keyboard)
-    0xA1, 0x01,       // Collection (Application)
-    0x85, 0x01,       //   Report ID (1)
+    0x05, 0x01,
+    0x09, 0x06,
+    0xA1, 0x01,
+    0x85, 0x01,
 
-    // Modifier byte.
-    0x05, 0x07,       //   Usage Page (Keyboard)
-    0x19, 0xE0,       //   Usage Minimum (Left Control)
-    0x29, 0xE7,       //   Usage Maximum (Right GUI)
-    0x15, 0x00,       //   Logical Minimum (0)
-    0x25, 0x01,       //   Logical Maximum (1)
-    0x75, 0x01,       //   Report Size (1)
-    0x95, 0x08,       //   Report Count (8)
-    0x81, 0x02,       //   Input (Data, Variable, Absolute)
+    0x05, 0x07,
+    0x19, 0xE0,
+    0x29, 0xE7,
+    0x15, 0x00,
+    0x25, 0x01,
+    0x75, 0x01,
+    0x95, 0x08,
+    0x81, 0x02,
 
-    // Reserved byte.
     0x95, 0x01,
     0x75, 0x08,
-    0x81, 0x01,       //   Input (Constant)
+    0x81, 0x01,
 
-    // Six keyboard usages.
     0x95, 0x06,
     0x75, 0x08,
     0x15, 0x00,
@@ -61,65 +58,61 @@ static const uint8_t native_hid_report_map[] = {
     0x05, 0x07,
     0x19, 0x00,
     0x29, 0x65,
-    0x81, 0x00,       //   Input (Data, Array)
+    0x81, 0x00,
 
     // LED output report ID 2.
     0x85, 0x02,
-    0x05, 0x08,       //   Usage Page (LEDs)
+    0x05, 0x08,
     0x19, 0x01,
     0x29, 0x05,
     0x15, 0x00,
     0x25, 0x01,
     0x75, 0x01,
     0x95, 0x05,
-    0x91, 0x02,       //   Output (Data, Variable, Absolute)
+    0x91, 0x02,
     0x75, 0x03,
     0x95, 0x01,
-    0x91, 0x01,       //   Output (Constant)
+    0x91, 0x01,
 
-    0xC0,             // End Keyboard Collection
+    0xC0,
 
     // ---------------------------------------------------------------------
     // Mouse application, input report ID 4.
     // Body is exactly four bytes: buttons, relative X, relative Y, wheel.
     // ---------------------------------------------------------------------
-    0x05, 0x01,       // Usage Page (Generic Desktop)
-    0x09, 0x02,       // Usage (Mouse)
-    0xA1, 0x01,       // Collection (Application)
-    0x85, 0x04,       //   Report ID (4)
-    0x09, 0x01,       //   Usage (Pointer)
-    0xA1, 0x00,       //   Collection (Physical)
+    0x05, 0x01,
+    0x09, 0x02,
+    0xA1, 0x01,
+    0x85, 0x04,
+    0x09, 0x01,
+    0xA1, 0x00,
 
-    // Three mouse buttons + five padding bits.
-    0x05, 0x09,       //   Usage Page (Button)
-    0x19, 0x01,       //   Usage Minimum (1)
-    0x29, 0x03,       //   Usage Maximum (3)
+    0x05, 0x09,
+    0x19, 0x01,
+    0x29, 0x03,
     0x15, 0x00,
     0x25, 0x01,
     0x95, 0x03,
     0x75, 0x01,
-    0x81, 0x02,       //   Input (Data, Variable, Absolute)
+    0x81, 0x02,
     0x95, 0x01,
     0x75, 0x05,
-    0x81, 0x01,       //   Input (Constant)
+    0x81, 0x01,
 
-    // Relative X/Y and wheel.
     0x05, 0x01,
-    0x09, 0x30,       //   Usage (X)
-    0x09, 0x31,       //   Usage (Y)
-    0x09, 0x38,       //   Usage (Wheel)
-    0x15, 0x81,       //   Logical Minimum (-127)
-    0x25, 0x7F,       //   Logical Maximum (127)
+    0x09, 0x30,
+    0x09, 0x31,
+    0x09, 0x38,
+    0x15, 0x81,
+    0x25, 0x7F,
     0x75, 0x08,
     0x95, 0x03,
-    0x81, 0x06,       //   Input (Data, Variable, Relative)
+    0x81, 0x06,
 
-    0xC0,             // End Physical Collection
-    0xC0,             // End Mouse Collection
+    0xC0,
+    0xC0,
 };
 
-// BTstack's runtime ATT DB helpers take mutable pointers for static attribute
-// values, even though these byte arrays are not modified by our code.
 static uint8_t report_ref_keyboard_input[2] = {1, 1};
 static uint8_t report_ref_output[2]         = {2, 2};
 static uint8_t report_ref_mouse_input[2]    = {4, 1};
@@ -146,9 +139,6 @@ static void native_hid_packet_handler(uint8_t packet_type, uint16_t channel, uin
 
     switch (subevent) {
         case HIDS_SUBEVENT_INPUT_REPORT_ENABLE:
-            // BTstack emits (con_handle, report_id, enable) for generic Input
-            // Report subscriptions. With v0.4 we accidentally displayed the
-            // report ID as the enabled value; v0.5 tracks both reports properly.
             if (size >= 7) {
                 uint8_t report_id = packet[5];
                 uint8_t enabled = packet[6];
@@ -184,8 +174,6 @@ static void native_hid_packet_handler(uint8_t packet_type, uint16_t channel, uin
     }
 }
 
-// Called from the patched MicroPython BTstack backend while the ATT DB is being
-// built, before att_server_init(). This mirrors BTstack's own HIDS GATT layout.
 void tufty_native_hid_db_append(void) {
     keyboard_input_handle = 0;
     mouse_input_handle = 0;
@@ -194,7 +182,6 @@ void tufty_native_hid_db_append(void) {
 
     att_db_util_add_service_uuid16(UUID_HID_SERVICE);
 
-    // Protocol Mode.
     att_db_util_add_characteristic_uuid16(
         UUID_PROTOCOL_MODE,
         ATT_PROPERTY_READ | ATT_PROPERTY_WRITE_WITHOUT_RESPONSE | ATT_PROPERTY_DYNAMIC,
@@ -204,7 +191,6 @@ void tufty_native_hid_db_append(void) {
         0
     );
 
-    // Keyboard Input Report: encrypted, notify, Report Reference = ID 1/Input.
     keyboard_input_handle = att_db_util_add_characteristic_uuid16(
         UUID_REPORT,
         ATT_PROPERTY_READ | ATT_PROPERTY_WRITE | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC,
@@ -222,7 +208,6 @@ void tufty_native_hid_db_append(void) {
         sizeof(report_ref_keyboard_input)
     );
 
-    // Mouse Input Report: encrypted, notify, Report Reference = ID 4/Input.
     mouse_input_handle = att_db_util_add_characteristic_uuid16(
         UUID_REPORT,
         ATT_PROPERTY_READ | ATT_PROPERTY_WRITE | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC,
@@ -240,7 +225,6 @@ void tufty_native_hid_db_append(void) {
         sizeof(report_ref_mouse_input)
     );
 
-    // Keyboard LED Output Report: ID 2/Output.
     att_db_util_add_characteristic_uuid16(
         UUID_REPORT,
         ATT_PROPERTY_READ | ATT_PROPERTY_WRITE | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC,
@@ -258,7 +242,6 @@ void tufty_native_hid_db_append(void) {
         sizeof(report_ref_output)
     );
 
-    // Report Map is supplied dynamically by hids_device.c.
     att_db_util_add_characteristic_uuid16(
         UUID_REPORT_MAP,
         ATT_PROPERTY_READ | ATT_PROPERTY_DYNAMIC,
@@ -268,7 +251,6 @@ void tufty_native_hid_db_append(void) {
         0
     );
 
-    // Boot keyboard/mouse reports.
     boot_keyboard_input_handle = att_db_util_add_characteristic_uuid16(
         UUID_BOOT_KEYBOARD_INPUT,
         ATT_PROPERTY_READ | ATT_PROPERTY_WRITE | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC,
@@ -294,7 +276,6 @@ void tufty_native_hid_db_append(void) {
         0
     );
 
-    // HID Information is static, exactly like BTstack's hids.gatt.
     att_db_util_add_characteristic_uuid16(
         UUID_HID_INFORMATION,
         ATT_PROPERTY_READ,
@@ -304,7 +285,6 @@ void tufty_native_hid_db_append(void) {
         sizeof(hid_information)
     );
 
-    // HID Control Point.
     att_db_util_add_characteristic_uuid16(
         UUID_HID_CONTROL_POINT,
         ATT_PROPERTY_WRITE_WITHOUT_RESPONSE | ATT_PROPERTY_DYNAMIC,
@@ -315,7 +295,6 @@ void tufty_native_hid_db_append(void) {
     );
 }
 
-// Called immediately after MicroPython calls att_server_init().
 void tufty_native_hid_start(void) {
     keyboard_input_enabled = 0;
     mouse_input_enabled = 0;
@@ -323,8 +302,6 @@ void tufty_native_hid_start(void) {
     boot_mouse_enabled = 0;
     protocol_mode = 1;
 
-    // Exactly three generic Report characteristics are present:
-    // keyboard input, mouse input and keyboard LED output.
     hids_device_init(
         0,
         native_hid_report_map,
@@ -339,6 +316,8 @@ static void require_native_hid_ready(uint16_t handle) {
     }
 }
 
+// Keep keyboard transmission identical to the proven v0.4 path. Report IDs are
+// metadata on the characteristic; the notification body is the raw report body.
 static mp_obj_t bt_hid_send_input(mp_obj_t conn_obj, mp_obj_t report_obj) {
     mp_buffer_info_t buf;
     mp_get_buffer_raise(report_obj, &buf, MP_BUFFER_READ);
@@ -347,9 +326,9 @@ static mp_obj_t bt_hid_send_input(mp_obj_t conn_obj, mp_obj_t report_obj) {
     }
     require_native_hid_ready(keyboard_input_handle);
 
-    int err = hids_device_send_input_report_for_id(
+    int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
-        1,
+        keyboard_input_handle,
         (const uint8_t *)buf.buf,
         (uint16_t)buf.len
     );
@@ -365,9 +344,9 @@ static mp_obj_t bt_hid_send_mouse(mp_obj_t conn_obj, mp_obj_t report_obj) {
     }
     require_native_hid_ready(mouse_input_handle);
 
-    int err = hids_device_send_input_report_for_id(
+    int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
-        4,
+        mouse_input_handle,
         (const uint8_t *)buf.buf,
         (uint16_t)buf.len
     );
@@ -383,8 +362,9 @@ static mp_obj_t bt_hid_send_boot_keyboard(mp_obj_t conn_obj, mp_obj_t report_obj
     }
     require_native_hid_ready(boot_keyboard_input_handle);
 
-    int err = hids_device_send_boot_keyboard_input_report(
+    int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
+        boot_keyboard_input_handle,
         (const uint8_t *)buf.buf,
         (uint16_t)buf.len
     );
@@ -400,8 +380,9 @@ static mp_obj_t bt_hid_send_boot_mouse(mp_obj_t conn_obj, mp_obj_t report_obj) {
     }
     require_native_hid_ready(boot_mouse_input_handle);
 
-    int err = hids_device_send_boot_mouse_input_report(
+    int err = att_server_notify(
         (hci_con_handle_t)mp_obj_get_int(conn_obj),
+        boot_mouse_input_handle,
         (const uint8_t *)buf.buf,
         (uint16_t)buf.len
     );
