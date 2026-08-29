@@ -1,6 +1,6 @@
 export TERM=${TERM:="xterm-256color"}
 
-# cache buster: 2025-10-08
+# cache buster: native-hids-2026-08-29-r2
 
 MICROPYTHON_FLAVOUR="pimoroni"
 MICROPYTHON_VERSION="bw-1.27.0"
@@ -45,6 +45,18 @@ function ci_micropython_clone {
     git -C "$CI_BUILD_ROOT/micropython" submodule update --init lib/btstack
     git -C "$CI_BUILD_ROOT/micropython/lib/pico-sdk" apply "$CI_PROJECT_ROOT/ci/pico-sdk-crt0-startup-rosc.patch"
     python3 "$CI_PROJECT_ROOT/ci/enable_ble_pairing.py" "$CI_BUILD_ROOT/micropython"
+
+    # Do not allow Actions dependency caching to silently give us a pairing-only
+    # MicroPython tree. The native HID hooks must be present before configuring.
+    grep -q "tufty_native_hid_db_append" "$CI_BUILD_ROOT/micropython/extmod/btstack/modbluetooth_btstack.c" || {
+        echo "ERROR: native HIDS DB hook missing from patched MicroPython"
+        exit 1
+    }
+    grep -q "tufty_native_hid_start" "$CI_BUILD_ROOT/micropython/extmod/btstack/modbluetooth_btstack.c" || {
+        echo "ERROR: native HIDS start hook missing from patched MicroPython"
+        exit 1
+    }
+    log_success "Verified native HIDS hooks in MicroPython BTstack backend"
 }
 
 function ci_tools_clone {
