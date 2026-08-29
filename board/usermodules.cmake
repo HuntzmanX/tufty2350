@@ -49,6 +49,9 @@ include(adcfft/micropython)
 include(modules/c/powman/micropython)
 target_compile_definitions(usermod_sleep INTERFACE TUFTY=1)
 
+# Native BTstack HID service + MicroPython sender
+include(modules/c/bt_hid/micropython)
+
 # C++ Magic Memory
 include(cppmem/micropython)
 
