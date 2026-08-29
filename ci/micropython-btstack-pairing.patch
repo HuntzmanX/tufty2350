@@ -1,0 +1,44 @@
+diff --git a/extmod/btstack/modbluetooth_btstack.c b/extmod/btstack/modbluetooth_btstack.c
+index 7694a1874..mercury01 100644
+--- a/extmod/btstack/modbluetooth_btstack.c
++++ b/extmod/btstack/modbluetooth_btstack.c
+@@ -286,6 +286,13 @@ static void btstack_packet_handler_generic(uint8_t packet_type, uint16_t channel
+     } else if (event_type == BTSTACK_EVENT_NR_CONNECTIONS_CHANGED) {
+         DEBUG_printf("  --> btstack # conns changed\n");
+     } else if (event_type == HCI_EVENT_VENDOR_SPECIFIC) {
+         DEBUG_printf("  --> hci vendor specific\n");
++#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
++    } else if (event_type == SM_EVENT_JUST_WORKS_REQUEST) {
++        // BTstack requires an explicit application confirmation for
++        // Just Works. Without an SM event handler Pico W/Pico 2 W can
++        // connect at ATT level but the pairing handshake stalls here.
++        uint16_t conn_handle = sm_event_just_works_request_get_handle(packet);
++        sm_just_works_confirm(conn_handle);
++#endif
+     } else if (event_type == SM_EVENT_AUTHORIZATION_RESULT ||
+                event_type == SM_EVENT_PAIRING_COMPLETE ||
+                // event_type == GAP_EVENT_DEDICATED_BONDING_COMPLETED || // No conn_handle
+@@ -350,6 +357,12 @@ static btstack_packet_callback_registration_t hci_event_callback_registration = {
+     .callback = &btstack_packet_handler_generic
+ };
+
++#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
++static btstack_packet_callback_registration_t sm_event_callback_registration = {
++    .callback = &btstack_packet_handler_generic
++};
++#endif
++
+ #if MICROPY_PY_BLUETOOTH_ENABLE_GATT_CLIENT
+ // For when the handler is being used for service discovery.
+ static void btstack_packet_handler_discover_services(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
+@@ -632,6 +645,11 @@ int mp_bluetooth_init(void) {
+     // Register for HCI events.
+     hci_add_event_handler(&hci_event_callback_registration);
+
++#if MICROPY_PY_BLUETOOTH_ENABLE_PAIRING_BONDING
++    // Security Manager events are not delivered to the HCI handler list.
++    sm_add_event_handler(&sm_event_callback_registration);
++#endif
++
+     // Register for ATT server events.
+     att_server_register_packet_handler(&btstack_packet_handler_att_server);

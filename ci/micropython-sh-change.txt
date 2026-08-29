@@ -1,0 +1,4 @@
+# In ci/micropython.sh, inside ci_micropython_clone(), add this immediately
+# after the existing cyw43-driver patch line:
+git -C "$CI_BUILD_ROOT/micropython" apply \
+    "$CI_PROJECT_ROOT/ci/micropython-btstack-pairing.patch"
