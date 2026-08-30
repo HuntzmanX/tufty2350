@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #include "py/runtime.h"
 #include "py/obj.h"
@@ -7,7 +8,7 @@
 #include "ble/att_db_util.h"
 #include "ble/att_server.h"
 #include "ble/gatt-service/hids_device.h"
-#include "btstack_defines.h"
+#include "btstack.h"
 
 #define UUID_HID_SERVICE          0x1812
 #define UUID_PROTOCOL_MODE        0x2A4E
@@ -20,19 +21,15 @@
 #define UUID_HID_CONTROL_POINT    0x2A4C
 #define UUID_REPORT_REFERENCE     0x2908
 
-// Native report layout:
-//   Report 1 = keyboard input (8 bytes, no report ID in notification body)
+// Native report layout is deliberately unchanged from Consumer-HID v0.6.5:
+//   Report 1 = keyboard input (8 bytes)
 //   Report 3 = Consumer Control input (2-byte usage ID, little-endian)
 //   Report 4 = mouse input (4 bytes: buttons, X, Y, wheel)
 //
-// We deliberately keep exactly three Report characteristics because BTstack's
-// hids_device_init() generic storage has room for three reports. Boot keyboard
-// and Boot mouse are separate HIDS characteristics and do not consume this
-// generic Report storage.
+// Keeping the descriptor byte-for-byte compatible avoids forcing already
+// bonded hosts to rediscover a different HID profile.
 static const uint8_t native_hid_report_map[] = {
-    // ---------------------------------------------------------------------
     // Keyboard application, input report ID 1.
-    // ---------------------------------------------------------------------
     0x05, 0x01,
     0x09, 0x06,
     0xA1, 0x01,
@@ -62,32 +59,21 @@ static const uint8_t native_hid_report_map[] = {
 
     0xC0,
 
-    // ---------------------------------------------------------------------
     // Consumer Control application, input report ID 3.
-    //
-    // The body is a 16-bit Consumer usage ID (little-endian). A value of
-    // zero means "no control pressed". Keeping this as a usage array rather
-    // than hard-wiring one button means Python can later send other Consumer
-    // usages (volume/media/browser controls) without changing the descriptor.
-    // AC Back is usage 0x0224.
-    // ---------------------------------------------------------------------
-    0x05, 0x0C,             // Usage Page (Consumer)
-    0x09, 0x01,             // Usage (Consumer Control)
-    0xA1, 0x01,             // Collection (Application)
-    0x85, 0x03,             //   Report ID (3)
-    0x15, 0x00,             //   Logical Minimum (0)
-    0x26, 0xFF, 0x02,       //   Logical Maximum (0x02FF)
-    0x19, 0x00,             //   Usage Minimum (0)
-    0x2A, 0xFF, 0x02,       //   Usage Maximum (0x02FF)
-    0x75, 0x10,             //   Report Size (16)
-    0x95, 0x01,             //   Report Count (1)
-    0x81, 0x00,             //   Input (Data, Array, Absolute)
-    0xC0,                   // End Collection
+    0x05, 0x0C,
+    0x09, 0x01,
+    0xA1, 0x01,
+    0x85, 0x03,
+    0x15, 0x00,
+    0x26, 0xFF, 0x02,
+    0x19, 0x00,
+    0x2A, 0xFF, 0x02,
+    0x75, 0x10,
+    0x95, 0x01,
+    0x81, 0x00,
+    0xC0,
 
-    // ---------------------------------------------------------------------
     // Mouse application, input report ID 4.
-    // Body is exactly four bytes: buttons, relative X, relative Y, wheel.
-    // ---------------------------------------------------------------------
     0x05, 0x01,
     0x09, 0x02,
     0xA1, 0x01,
@@ -138,6 +124,16 @@ static uint8_t mouse_input_enabled = 0;
 static uint8_t boot_keyboard_enabled = 0;
 static uint8_t boot_mouse_enabled = 0;
 static uint8_t protocol_mode = 1;
+
+// Pairing is locked unless the app explicitly opens a pairing window.
+// Re-encryption by already bonded devices does not require Just Works approval.
+static bool native_pairing_allowed = false;
+
+// Called by the MicroPython BTstack patch before accepting/declining
+// SM_EVENT_JUST_WORKS_REQUEST.
+bool tufty_native_pairing_allowed(void) {
+    return native_pairing_allowed;
+}
 
 static void native_hid_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size) {
     (void)channel;
@@ -315,6 +311,7 @@ void tufty_native_hid_start(void) {
     boot_keyboard_enabled = 0;
     boot_mouse_enabled = 0;
     protocol_mode = 1;
+    native_pairing_allowed = false;
 
     hids_device_init(
         0,
@@ -330,8 +327,6 @@ static void require_native_hid_ready(uint16_t handle) {
     }
 }
 
-// Keep keyboard transmission identical to the proven v0.4 path. Report IDs are
-// metadata on the characteristic; the notification body is the raw report body.
 static mp_obj_t bt_hid_send_input(mp_obj_t conn_obj, mp_obj_t report_obj) {
     mp_buffer_info_t buf;
     mp_get_buffer_raise(report_obj, &buf, MP_BUFFER_READ);
@@ -368,12 +363,6 @@ static mp_obj_t bt_hid_send_mouse(mp_obj_t conn_obj, mp_obj_t report_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(bt_hid_send_mouse_obj, bt_hid_send_mouse);
 
-// Consumer Control report body is a 16-bit usage ID, little-endian.
-// Examples:
-//   0x0224 = AC Back
-//   0x00E9 = Volume Increment
-//   0x00EA = Volume Decrement
-// Send 0x0000 after the pressed usage to release it.
 static mp_obj_t bt_hid_send_consumer(mp_obj_t conn_obj, mp_obj_t report_obj) {
     mp_buffer_info_t buf;
     mp_get_buffer_raise(report_obj, &buf, MP_BUFFER_READ);
@@ -428,6 +417,100 @@ static mp_obj_t bt_hid_send_boot_mouse(mp_obj_t conn_obj, mp_obj_t report_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(bt_hid_send_boot_mouse_obj, bt_hid_send_boot_mouse);
 
+// -------------------------------------------------------------------------
+// Multi-host / Bluetooth identity management
+// -------------------------------------------------------------------------
+
+static mp_obj_t bt_hid_set_pairing_enabled(mp_obj_t enabled_obj) {
+    native_pairing_allowed = mp_obj_is_true(enabled_obj);
+    return mp_obj_new_bool(native_pairing_allowed);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bt_hid_set_pairing_enabled_obj, bt_hid_set_pairing_enabled);
+
+static mp_obj_t bt_hid_pairing_enabled(void) {
+    return mp_obj_new_bool(native_pairing_allowed);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_pairing_enabled_obj, bt_hid_pairing_enabled);
+
+static mp_obj_t bt_hid_set_identity_public(void) {
+    // Identity changes are only safe while not connected. The app always
+    // stops advertising and disconnects first; disable advertising here too
+    // as a defensive measure.
+    gap_advertisements_enable(false);
+    gap_random_address_set_mode(GAP_RANDOM_ADDRESS_TYPE_OFF);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_set_identity_public_obj, bt_hid_set_identity_public);
+
+static mp_obj_t bt_hid_set_identity_random(mp_obj_t addr_obj) {
+    mp_buffer_info_t buf;
+    mp_get_buffer_raise(addr_obj, &buf, MP_BUFFER_READ);
+
+    if (buf.len != 6) {
+        mp_raise_ValueError(MP_ERROR_TEXT("identity address must be 6 bytes"));
+    }
+
+    bd_addr_t addr;
+    memcpy(addr, buf.buf, 6);
+
+    // Force Bluetooth Static Random address marker (top two bits = 1).
+    addr[0] = (uint8_t)((addr[0] & 0x3f) | 0xc0);
+
+    gap_advertisements_enable(false);
+    gap_random_address_set(addr);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bt_hid_set_identity_random_obj, bt_hid_set_identity_random);
+
+static mp_obj_t bt_hid_identity_info(void) {
+    uint8_t addr_type = BD_ADDR_TYPE_UNKNOWN;
+    bd_addr_t addr = {0};
+
+    gap_le_get_own_address(&addr_type, addr);
+
+    mp_obj_t items[2] = {
+        MP_OBJ_NEW_SMALL_INT(addr_type),
+        mp_obj_new_bytes(addr, sizeof(addr)),
+    };
+    return mp_obj_new_tuple(2, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_identity_info_obj, bt_hid_identity_info);
+
+static mp_obj_t bt_hid_disconnect(mp_obj_t conn_obj) {
+    hci_con_handle_t handle = (hci_con_handle_t)mp_obj_get_int(conn_obj);
+    gap_disconnect(handle);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bt_hid_disconnect_obj, bt_hid_disconnect);
+
+static mp_obj_t bt_hid_connection_info(mp_obj_t conn_obj) {
+    hci_con_handle_t handle = (hci_con_handle_t)mp_obj_get_int(conn_obj);
+    hci_connection_t *connection = hci_connection_for_handle(handle);
+
+    if (connection == NULL) {
+        return mp_const_none;
+    }
+
+    sm_connection_t *sm = &connection->sm_connection;
+    bool bonded = sm->sm_le_db_index >= 0;
+
+    // (peer_addr_type, peer_addr, encrypted, authenticated, bonded,
+    //  key_size, le_db_index, own_addr_type, own_addr)
+    mp_obj_t items[9] = {
+        MP_OBJ_NEW_SMALL_INT(connection->address_type),
+        mp_obj_new_bytes(connection->address, sizeof(connection->address)),
+        mp_obj_new_bool(sm->sm_connection_encrypted != 0),
+        mp_obj_new_bool(sm->sm_connection_authenticated != 0),
+        mp_obj_new_bool(bonded),
+        MP_OBJ_NEW_SMALL_INT(sm->sm_actual_encryption_key_size),
+        MP_OBJ_NEW_SMALL_INT(sm->sm_le_db_index),
+        MP_OBJ_NEW_SMALL_INT(sm->sm_own_addr_type),
+        mp_obj_new_bytes(sm->sm_own_address, sizeof(sm->sm_own_address)),
+    };
+    return mp_obj_new_tuple(9, items);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(bt_hid_connection_info_obj, bt_hid_connection_info);
+
 // Backwards-compatible v0.4 status tuple.
 static mp_obj_t bt_hid_status(void) {
     mp_obj_t items[4] = {
@@ -440,7 +523,7 @@ static mp_obj_t bt_hid_status(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_status_obj, bt_hid_status);
 
-// Extended v0.5 status tuple: keyboard, mouse, boot keyboard, boot mouse, mode.
+// Extended v0.5 status tuple remains exactly five items for app compatibility.
 static mp_obj_t bt_hid_status_ex(void) {
     mp_obj_t items[5] = {
         MP_OBJ_NEW_SMALL_INT(keyboard_input_enabled),
@@ -453,8 +536,6 @@ static mp_obj_t bt_hid_status_ex(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(bt_hid_status_ex_obj, bt_hid_status_ex);
 
-// Kept separate from status_ex() so existing v0.5 applications retain the
-// exact five-item tuple they already expect.
 static mp_obj_t bt_hid_consumer_status(void) {
     return MP_OBJ_NEW_SMALL_INT(consumer_input_enabled);
 }
@@ -472,6 +553,15 @@ static const mp_rom_map_elem_t bt_hid_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_send_consumer), MP_ROM_PTR(&bt_hid_send_consumer_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_boot_keyboard), MP_ROM_PTR(&bt_hid_send_boot_keyboard_obj) },
     { MP_ROM_QSTR(MP_QSTR_send_boot_mouse), MP_ROM_PTR(&bt_hid_send_boot_mouse_obj) },
+
+    { MP_ROM_QSTR(MP_QSTR_set_pairing_enabled), MP_ROM_PTR(&bt_hid_set_pairing_enabled_obj) },
+    { MP_ROM_QSTR(MP_QSTR_pairing_enabled), MP_ROM_PTR(&bt_hid_pairing_enabled_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_identity_public), MP_ROM_PTR(&bt_hid_set_identity_public_obj) },
+    { MP_ROM_QSTR(MP_QSTR_set_identity_random), MP_ROM_PTR(&bt_hid_set_identity_random_obj) },
+    { MP_ROM_QSTR(MP_QSTR_identity_info), MP_ROM_PTR(&bt_hid_identity_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_disconnect), MP_ROM_PTR(&bt_hid_disconnect_obj) },
+    { MP_ROM_QSTR(MP_QSTR_connection_info), MP_ROM_PTR(&bt_hid_connection_info_obj) },
+
     { MP_ROM_QSTR(MP_QSTR_status), MP_ROM_PTR(&bt_hid_status_obj) },
     { MP_ROM_QSTR(MP_QSTR_status_ex), MP_ROM_PTR(&bt_hid_status_ex_obj) },
     { MP_ROM_QSTR(MP_QSTR_consumer_status), MP_ROM_PTR(&bt_hid_consumer_status_obj) },
