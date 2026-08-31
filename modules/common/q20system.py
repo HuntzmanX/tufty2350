@@ -73,7 +73,7 @@ def _raw_code(value):
     if isinstance(value, str) and len(value) == 1:
         try:
             return ord(value) & 0xFF
-        except Exception:
+        except Exception:  # noqa: BLE001 - driver values are intentionally loose
             return None
     return None
 
@@ -222,7 +222,7 @@ def _ensure_keyboard(force=False):
     try:
         _ensure_system_path()
         from bbq20kbd import BBQ20Keyboard
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - optional external driver
         _last_error = "driver: " + str(exc)
         return None
 
@@ -249,7 +249,7 @@ def _ensure_keyboard(force=False):
             _i2c = i2c
             _last_error = None
             return keyboard
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - probe each candidate bus safely
             _last_error = str(exc)
 
     return None
@@ -267,7 +267,7 @@ def enable_modifier_reporting():
         if wanted != current:
             _i2c.writeto(Q20_ADDRESS, bytes((REG_CFG_WRITE, wanted)))
         return True
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - I2C hardware can fail dynamically
         _last_error = str(exc)
         return False
 
@@ -327,7 +327,7 @@ def client_start(backlight=None, report_mods=True, flush=True):
     if flush:
         try:
             keyboard.flush()
-        except Exception:
+        except Exception:  # noqa: BLE001 - legacy driver compatibility
             pass
 
     if report_mods:
@@ -335,13 +335,13 @@ def client_start(backlight=None, report_mods=True, flush=True):
         if flush:
             try:
                 keyboard.flush()
-            except Exception:
+            except Exception:  # noqa: BLE001 - legacy driver compatibility
                 pass
 
     if backlight is not None:
         try:
             keyboard.backlight = backlight
-        except Exception:
+        except Exception:  # noqa: BLE001 - some driver builds vary here
             pass
 
     return keyboard
@@ -379,7 +379,7 @@ def poll(max_events=16):
 
     try:
         incoming = keyboard.update(int(max_events))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - hardware poll must not crash Badgeware
         _last_error = str(exc)
         return False
 
@@ -392,7 +392,7 @@ def poll(max_events=16):
             _motion_y += int(getattr(keyboard, "dy", 0))
             _motion_sx += int(getattr(keyboard, "sx", 0))
             _motion_sy += int(getattr(keyboard, "sy", 0))
-        except Exception:
+        except Exception:  # noqa: BLE001 - driver motion attrs are optional
             pass
 
     if incoming:
