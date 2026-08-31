@@ -11,6 +11,15 @@ except OSError:
     fatal_error("System Error!", "Unable to mount filesystem. This may be a temporary error, try resetting your board!")
 
 
+# Mercury / BBQ20 system layer. This patches Badgeware's shared poll() and
+# launch() hooks without replacing the user's /system filesystem.
+try:
+    import q20system
+    q20system.install()
+except Exception as exc:  # Q20 is optional; never block Badgeware boot.
+    print("Q20 system service unavailable:", exc)
+
+
 try:
     with open("hardware_test.txt", "r"):
         import hardware_test   # noqa F401
