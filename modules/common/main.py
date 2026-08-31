@@ -16,8 +16,18 @@ except OSError:
 try:
     import q20system
     q20system.install()
-except Exception as exc:  # Q20 is optional; never block Badgeware boot.
+except Exception as exc:  # noqa: BLE001 - Q20 is optional system hardware
     print("Q20 system service unavailable:", exc)
+
+
+# Firmware v0.7.3 compatibility layer:
+# - routes legacy BBQ20Keyboard users through q20system's queue
+# - blanks the ST7789/backlight before BB+Hangup sleep
+try:
+    import q20compat
+    q20compat.install()
+except Exception as exc:  # noqa: BLE001 - never block Badgeware boot
+    print("Q20 compatibility service unavailable:", exc)
 
 
 try:
