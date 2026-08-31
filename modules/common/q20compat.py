@@ -172,7 +172,7 @@ def _patch_driver():
     # second physical reader from it once q20system owns the device.
     if getattr(module, "_Q20SYSTEM_ORIGINAL_CLASS", None) is None:
         try:
-            module._Q20SYSTEM_ORIGINAL_CLASS = current
+            setattr(module, "_Q20SYSTEM_ORIGINAL_CLASS", current)
         except Exception:  # noqa: BLE001 - module may reject custom attrs
             pass
 
