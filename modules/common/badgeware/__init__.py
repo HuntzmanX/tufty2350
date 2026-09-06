@@ -193,6 +193,10 @@ for k, v in picovector.__dict__.items():
     if not k.startswith("__"):
         setattr(builtins, k, v)
 
+# Badgeware 2.x compatibility for MercuryOS and existing apps.
+# The newer PicoVector API renamed rom_font to font; keep the legacy name too.
+builtins.rom_font = font
+
 # Hoist image anti-aliasing constants
 builtins.OFF = image.OFF
 builtins.X2 = image.X2
