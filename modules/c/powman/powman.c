@@ -118,8 +118,8 @@ void pcf85063_wakeup_init(uint8_t period) {
 void powman_init() {
     uint64_t abs_time_ms = 1746057600000; // 2025/05/01 - Milliseconds since epoch
 
-    // Never restored: PSRAM holds the MicroPython heap and is unmapped below, so no
-    // handler may run between here and the core powering off.
+    // PSRAM holds the MicroPython heap. Keep handlers out while clk_sys changes
+    // and the old 250MHz QMI timing is briefly invalid.
     save_and_disable_interrupts();
 
     clear_double_tap_flag();
@@ -127,12 +127,32 @@ void powman_init() {
     // Run everything from pll_usb pll and stop pll_sys
     set_sys_clock_48mhz();
 
-    // QMI_M1_TIMING.MAX_SELECT bounds PSRAM CS-low in clk_sys cycles, so the drop above
-    // stretches it past the 8us the part allows. Re-derive it as machine.freq() does.
-    if (psram_is_available()) {
-        psram_configure_params(PICO_DEFAULT_PSRAM_MAX_FREQ, PICO_DEFAULT_PSRAM_MAX_SELECT, PICO_DEFAULT_PSRAM_MIN_DESELECT);
-        psram_reinitialize();
+    // Badgeware bw-1.27.0 predates hardware_psram, so reproduce the timing
+    // calculation from its own rp2_psram.c without re-entering QMI direct mode.
+    // Re-running psram_init() here would unnecessarily re-detect/reconfigure
+    // PSRAM while the MicroPython heap is live; only the timing register needs
+    // to follow the new 48MHz clk_sys before we power the core down.
+    const int max_psram_freq = 133000000;
+    const int clock_hz = clock_get_hz(clk_sys);
+    int divisor = (clock_hz + max_psram_freq - 1) / max_psram_freq;
+    if (divisor == 1 && clock_hz > 100000000) {
+        divisor = 2;
     }
+    int rxdelay = divisor;
+    if (clock_hz / divisor > 100000000) {
+        rxdelay += 1;
+    }
+
+    const int clock_period_fs = 1000000000000000ll / clock_hz;
+    const int max_select = (125 * 1000000) / clock_period_fs;
+    const int min_deselect = (18 * 1000000 + (clock_period_fs - 1)) / clock_period_fs - (divisor + 1) / 2;
+
+    qmi_hw->m[1].timing = 1 << QMI_M1_TIMING_COOLDOWN_LSB |
+        QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB |
+        max_select << QMI_M1_TIMING_MAX_SELECT_LSB |
+        min_deselect << QMI_M1_TIMING_MIN_DESELECT_LSB |
+        rxdelay << QMI_M1_TIMING_RXDELAY_LSB |
+        divisor << QMI_M1_TIMING_CLKDIV_LSB;
 
     // Set up GPIO for optimum power consumption
     for (int i = 0; i < NUM_BANK0_GPIOS; ++i) {
