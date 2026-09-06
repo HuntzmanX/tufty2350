@@ -8,10 +8,10 @@ MICROPYTHON_VERSION="bw-1.28.0-3"
 PIMORONI_PICO_FLAVOUR="pimoroni"
 PIMORONI_PICO_VERSION="37a1b6500f77924b2a3287009734bb24d4809bf1"
 
-# Pin the exact PicoVector-MicroPython revision used by the successful
-# Mercury BLE firmware build on 2026-08-29. Tracking main made firmware
-# builds non-reproducible and later introduced duplicate qrcodegen symbols.
-PIMORONI_PICOVECTOR_VERSION="fd58757bb5b35315d80c7aa98f029382eac2fb5b"
+# Pin the pre-QR PicoVector-MicroPython revision. The following commit added
+# image.qr() bindings before the matching core API was available, and later
+# revisions clash with the qrcodegen module already supplied by pimoroni-pico.
+PIMORONI_PICOVECTOR_VERSION="c4a0a262e10479e7d10d4f6df19e677ed4ac6e57"
 
 PY_DECL_VERSION="v0.0.5"
 DIR2UF2_VERSION="v0.1.0"
