@@ -10,7 +10,7 @@ target_include_directories(usermod_sleep INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
 )
 
-target_link_libraries(usermod_sleep INTERFACE hardware_powman hardware_gpio)
+target_link_libraries(usermod_sleep INTERFACE hardware_powman hardware_gpio hardware_psram)
 
 target_link_libraries(usermod INTERFACE usermod_sleep)
 
